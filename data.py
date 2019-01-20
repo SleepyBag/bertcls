@@ -6,6 +6,7 @@ import os
 import csv
 import word2vec as w2v
 from bert import tokenization
+from tqdm import tqdm
 
 
 reading_col_name = ['usr', 'prd', 'rating', 'content']

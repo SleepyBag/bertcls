@@ -16,7 +16,7 @@ def var(name, shape, initializer):
     return tf.get_variable(name, shape=shape, initializer=initializer)
 
 
-class MLP(object):
+class ATTENTION(object):
 
     def __init__(self, args):
         self.max_doc_len = args['max_doc_len']
@@ -52,54 +52,6 @@ class MLP(object):
                 'prd_emb': var('prd_emb', [self.prd_cnt, hsize], self.emb_initializer)
             }
 
-    def nsc(self, x, max_sen_len, max_doc_len, sen_len, doc_len):
-        x = tf.reshape(x, [-1, max_sen_len, self.emb_dim])
-        sen_len = tf.reshape(sen_len, [-1])
-
-        def lstm(inputs, sequence_length, hidden_size, scope):
-            cell_fw = tf.nn.rnn_cell.LSTMCell(hidden_size // 2, forget_bias=0.,
-                                              initializer=xavier())
-            cell_bw = tf.nn.rnn_cell.LSTMCell(hidden_size // 2, forget_bias=0.,
-                                              initializer=xavier())
-            outputs, state = tf.nn.bidirectional_dynamic_rnn(
-                cell_fw=cell_fw, cell_bw=cell_bw, inputs=inputs,
-                sequence_length=sequence_length, dtype=tf.float32, scope=scope)
-            outputs = tf.concat(outputs, axis=2)
-            return outputs, state
-
-        with tf.variable_scope('sentence_layer'):
-            # lstm_outputs, _state = lstm(x, sen_len, self.hidden_size, 'lstm')
-            # lstm_outputs = tf.reshape(lstm_outputs, [-1, max_sen_len, self.hidden_size])
-            lstm_bkg, _state = lstm(x, sen_len, self.hidden_size, 'lstm_bkg')
-            lstm_bkg = tf.reshape(lstm_bkg, [-1, max_sen_len, self.hidden_size])
-            lstm_outputs = lstm_bkg
-
-            alphas = attention(lstm_bkg, [], sen_len, max_sen_len,
-                               biases_initializer=self.biases_initializer,
-                               weights_initializer=self.weights_initializer)
-            sen_bkg = tf.matmul(alphas, lstm_outputs)
-            sen_bkg = tf.reshape(sen_bkg, [-1, self.hidden_size], name='new_bkg')
-        outputs = tf.reshape(sen_bkg, [-1, max_doc_len, self.hidden_size])
-
-        with tf.variable_scope('document_layer'):
-            # lstm_outputs, _state = lstm(outputs, doc_len, self.hidden_size, 'lstm')
-            lstm_bkg, _state = lstm(outputs, doc_len, self.hidden_size, 'lstm_bkg')
-            lstm_outputs = lstm_bkg
-
-            alphas = attention(lstm_bkg, [], doc_len, max_doc_len,
-                               biases_initializer=self.biases_initializer,
-                               weights_initializer=self.weights_initializer)
-            doc_bkg = tf.matmul(alphas, lstm_outputs)
-            doc_bkg = tf.reshape(doc_bkg, [-1, self.hidden_size], name='new_bkg')
-        outputs = doc_bkg
-
-        with tf.variable_scope('result'):
-            d_hats = tf.layers.dense(tf.concat([outputs, self.usr, self.prd], axis=1), self.cls_cnt,
-                                     kernel_initializer=self.weights_initializer,
-                                     bias_initializer=self.biases_initializer)
-
-        return d_hats
-
     def build(self, data_iter, bert_config_file):
         # get the inputs
         with tf.variable_scope('inputs'):
@@ -109,15 +61,12 @@ class MLP(object):
                  input_map['content'], input_map['rating'],
                  input_map['doc_len'])
 
-            input_x = tf.reshape(input_x, [-1, self.max_sen_len])
-            sen_len = tf.count_nonzero(input_x, axis=-1)
-            doc_len = doc_len // self.max_sen_len
-
             input_x = tf.cast(input_x, tf.int32)
             self.usr = lookup(self.embeddings['usr_emb'], usrid, name='cur_usr_embedding')
             self.prd = lookup(self.embeddings['prd_emb'], prdid, name='cur_prd_embedding')
-            input_x = tf.reshape(input_x, [-1, self.max_sen_len])
-            input_mask = tf.sequence_mask(sen_len, self.max_sen_len)
+            # input_x = lookup(self.embeddings['wrd_emb'], input_x, name='cur_wrd_embedding')
+            input_x = tf.reshape(input_x, [-1, self.max_doc_len])
+            input_mask = tf.sequence_mask(doc_len, self.max_doc_len)
             input_mask = tf.cast(input_mask, tf.int32)
 
         bert_config = BertConfig.from_json_file(bert_config_file)
@@ -126,15 +75,13 @@ class MLP(object):
                          token_type_ids=None,
                          use_one_hot_embeddings=False)
 
-        bert_output = bert.get_pooled_output()
-        bert_output = tf.reshape(bert_output, [-1, self.max_doc_len // self.max_sen_len,
-                                               bert_config.hidden_size])
-        doc_mask = tf.sequence_mask(doc_len, self.max_doc_len // self.max_sen_len)
-        bert_output = bert_output * tf.cast(doc_mask[:, :, None], tf.float32)
-        bert_output = tf.reduce_sum(bert_output, axis=1)
-        # bert_output = bert.get_sequence_output()
-        # bert_output = tf.layers.flatten(bert_output)
-        # bert_output = tf.nn.dropout(bert_output, .9)
+        pooled_output = bert.get_pooled_output()
+        sequence_output = bert.get_sequence_output()
+        alphas = attention(sequence_output, None, self.max_doc_len, self.max_doc_len)
+        sequence_output = tf.matmul(alphas, sequence_output)
+        sequence_output = tf.squeeze(sequence_output, axis=1)
+        bert_output = tf.concat([pooled_output, sequence_output], axis=1)
+
         logits = tf.layers.dense(bert_output, self.cls_cnt,
                                  kernel_initializer=tf.truncated_normal_initializer(stddev=0.02))
         self.bert_output = bert_output

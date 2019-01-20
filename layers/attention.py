@@ -5,6 +5,7 @@ import tensorflow as tf
 def attention(h, bkg, doc_len, real_max_len,
               biases_initializer=tf.initializers.zeros(),
               weights_initializer=tf.contrib.layers.xavier_initializer()):
+    bkg = [] if bkg is None else bkg
     max_len = h.shape[1]
     hidden_size = h.shape[2]
 

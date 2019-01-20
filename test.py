@@ -11,7 +11,6 @@ from colored import fg, stylize
 import math
 from tensorflow.python import debug as tf_debug
 
-
 # delete all flags that remained by last run
 def del_all_flags(FLAGS):
     flags_dict = FLAGS._flags()

@@ -7,6 +7,10 @@ def hop(scope, last, sentence, sentence_bkg, bkg_iter, bkg_fix,
         doc_len, real_max_len, convert_flag,
         biases_initializer=tf.initializers.zeros(),
         weights_initializer=tf.contrib.layers.xavier_initializer()):
+    if bkg_iter is None:
+        bkg_iter = []
+    if bkg_fix is None:
+        bkg_fix = []
     if not isinstance(bkg_fix, Iterable):
         bkg_fix = [bkg_fix]
     bkg_fix = list(bkg_fix)
